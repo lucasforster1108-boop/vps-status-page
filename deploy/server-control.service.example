@@ -1,0 +1,21 @@
+# 可选控制 API 的 systemd 单元示例。改好路径与 token 后：
+#   sudo cp server-control.service.example /etc/systemd/system/vps-status-control.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now vps-status-control
+# token 生成：openssl rand -hex 24 —— 把同一个值同时填到 web/index.html 的 PAGE_CONFIG.controlToken。
+# 不要把填好真实 token 的 unit 文件提交进仓库。
+[Unit]
+Description=VPS Status Control API (optional)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/vps-status
+Environment=VPS_STATUS_CONFIG=/opt/vps-status/config.json
+Environment=STATUS_CONTROL_TOKEN=在这里填你自己生成的token
+ExecStart=/usr/bin/python3 /opt/vps-status/control/control_api.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

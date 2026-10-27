@@ -1,0 +1,10 @@
+# 采集脚本：每分钟跑一次，生成 status.json
+# 把下面一行加到运行采集脚本的用户的 crontab（crontab -e），路径按你的实际部署改：
+#
+# * * * * * VPS_STATUS_CONFIG=/opt/vps-status/config.json /usr/bin/python3 /opt/vps-status/collector/check_status.py >> /var/log/vps-status.log 2>&1
+#
+# 说明：
+# - config.json 里 output_path 指向站点根目录下的 status.json（如 /var/www/status/status.json），
+#   运行用户需要对该目录有写权限。
+# - 远程机采集走 SSH 密钥登录，运行用户的 ~/.ssh 里要放好 config 里引用的私钥，
+#   并先手动 ssh 一次把各机指纹写进 known_hosts（或在脚本里用 accept-new，模板默认已带）。

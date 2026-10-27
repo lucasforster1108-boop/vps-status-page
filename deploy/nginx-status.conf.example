@@ -1,0 +1,32 @@
+# 状态页 nginx 站点示例（脱敏版）。改成你自己的域名/证书/路径后放进 sites-enabled。
+# 生成 Basic Auth 密码文件：  sudo htpasswd -c /etc/nginx/.status_htpasswd 你的用户名
+server {
+    listen 8899 ssl;
+    server_name status.example.com;   # ← 改成你的域名，或直接用 _ 走 IP 访问
+
+    ssl_certificate     /etc/nginx/ssl/example.crt;   # ← 改成你的证书路径
+    ssl_certificate_key /etc/nginx/ssl/example.key;
+
+    root /var/www/status;             # ← web/ 目录部署到这里，status.json 也生成到这里
+    index index.html;
+
+    # 整个状态页都建议加 Basic Auth（页面里若启用控制按钮，token 是半公开的，这层是主防线）
+    auth_basic "Server Status";
+    auth_basic_user_file /etc/nginx/.status_htpasswd;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # 只有启用可选控制组件时才需要：把 /api/control 反代到本机控制 API
+    location /api/control {
+        proxy_pass http://127.0.0.1:8898;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # 状态数据别被缓存太久
+    location = /status.json {
+        add_header Cache-Control "no-store";
+    }
+}
