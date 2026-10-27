@@ -1,0 +1,1 @@
+{"background_color":"#1a1a2e","display":"standalone","icons":[{"purpose":"any","sizes":"192x192","src":"icon-192.png","type":"image/png"},{"purpose":"any maskable","sizes":"512x512","src":"icon-512.png","type":"image/png"}],"name":"服务器状态","scope":"./","short_name":"VPS状态","start_url":"./","theme_color":"#1a1a2e"}

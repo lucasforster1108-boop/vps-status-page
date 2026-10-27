@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>服务器状态</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a1a2e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icon-192.png">
+
+<style>
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#eee;margin:0;padding:8px;min-height:100dvh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:10px;flex-shrink:0}
+h1{font-size:17px;margin:0;white-space:nowrap}
+.updated{color:#888;font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.refresh{padding:7px 14px;background:#0f3460;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;flex-shrink:0}
+#list{flex:1;display:grid;gap:6px;margin-top:8px;grid-template-columns:repeat(4,1fr)}
+@media(max-width:900px){#list{grid-template-columns:repeat(2,1fr)}}
+.card{background:#16213e;border-radius:10px;padding:8px 10px;border:1px solid #0f3460;overflow:hidden}
+.card h2{font-size:13px;margin:0 0 2px;display:flex;justify-content:space-between;align-items:center}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.ok{background:#2ecc71}.bad{background:#e74c3c}.warn{background:#f39c12}
+.ip{color:#888;font-size:11px;margin-bottom:2px}
+.role{font-size:11px;color:#7fb3d5;margin-bottom:5px}
+.row{display:flex;justify-content:space-between;font-size:11px;margin:2px 0;align-items:center;gap:6px}
+.row.lbl{color:#aab}
+.bar{height:5px;background:#0f3460;border-radius:3px;margin:1px 0 4px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px;background:#3498db}
+.bar i.hot{background:#e74c3c}.bar i.warm{background:#f39c12}
+.tnote{font-size:10px;color:#888;margin:-1px 0 2px}
+.btns{display:flex;gap:6px;margin-top:6px}
+.btns button{flex:1;padding:5px 0;border:none;border-radius:7px;font-size:12px;cursor:pointer;color:#fff}
+.b-start{background:#27ae60}.b-stop{background:#c0392b}.b-reset{background:#e67e22}.b-reboot{background:#8e44ad}
+.btns button:active{opacity:.7}
+.btns button:disabled{opacity:.35;cursor:not-allowed}
+</style>
+</head>
+<body>
+<header><h1>🖥️ 服务器状态</h1><div class="updated" id="updated">加载中...</div><button class="refresh" onclick="load()">🔄 刷新</button></header>
+<div id="list"></div>
+<div style="flex-shrink:0;color:#666;font-size:11px;margin-top:6px">注：流量数据由各机 vnstat 统计，当月数据自 vnstat 在该机开始统计之日起累计。</div>
+<script>
+// ===== 可选的远程控制（开机/关机/重启按钮）=====
+// 默认关闭。启用步骤：
+//   1) 部署 control/control_api.py，并给它设置同样的 token（环境变量 STATUS_CONTROL_TOKEN）；
+//   2) 把 controlEnabled 改为 true、controlToken 填成你自己生成的值
+//      （生成方法：openssl rand -hex 24 —— 切勿使用任何示例值）；
+//   3) 在 config.json 里给服务器配 control_actions，页面才会渲染对应按钮。
+// 页面本身是公开静态文件，token 写在这里等于半公开：务必同时给站点加 Basic Auth（见 deploy/ 示例）。
+const PAGE_CONFIG = {
+  controlEnabled: false,
+  controlToken: ''
+};
+const ACTION_LABELS = { start: '▶ 开机', stop: '■ 关机', reset: '⟳ 重启', reboot: '⟳ 重启' };
+const ACTION_CLASS = { start: 'b-start', stop: 'b-stop', reset: 'b-reset', reboot: 'b-reboot' };
+function bar(pct){
+const n = parseInt(pct) || 0;
+const cls = n>=90 ? 'hot' : (n>=70 ? 'warm' : '');
+return '<div class=bar><i class="' + cls + '" style="width:' + Math.min(n, 100) + '%"></i></div>';
+}
+async function load(){
+document.getElementById('updated').textContent = '正在刷新...';
+try{
+const r = await fetch('status.json?t=' + Date.now());
+const d = await r.json();
+document.getElementById('updated').textContent = '更新于 ' + d.updated + ' (每分钟自动刷新)';
+let h = '';
+for(const s of d.servers){
+const good = s.state === 'RUNNING' && s.reach;
+h += '<div class=card><h2>' + s.name + ' <span class="dot ' + (good ? 'ok' : 'bad') + '"></span></h2>' +
+'<div class=ip>' + s.ip + ' · ' + s.loc + '</div>' +
+'<div class=role>' + (s.role || '') + '</div>';
+if(s.cpu_load !== undefined){
+h += '<div class=row><span class=lbl>CPU 负载</span><span>' + s.cpu_load + '</span></div>';
+const memUsedPct = s.mem_pct || 0;
+h += '<div class=row><span class=lbl>内存</span><span>已用 ' + s.mem_used + ' / 总 ' + s.mem_total + '</span></div>' + bar(memUsedPct);
+const dp = parseInt(s.disk_pct) || 0;
+h += '<div class=row><span class=lbl>磁盘</span><span>已用 ' + s.disk_used + ' / 总 ' + s.disk_total + '</span></div>' + bar(dp);
+if(s.traf_tx_s !== undefined){
+h += '<div class=row><span class=lbl>本月流量</span><span>已用 ' + s.traf_tx_s + ' / 总 ' + (s.traf_quota_s || '未录入') + '</span></div>';
+if(s.traf_pct !== null && s.traf_pct !== undefined){
+const tp = s.traf_pct;
+const tcls = tp>=90 ? 'hot' : (tp>=70 ? 'warm' : '');
+h += '<div class=bar><i class="' + tcls + '" style="width:' + Math.min(tp, 100) + '%"></i></div>';
+h += '<div class=tnote>' + tp + '% · ' + s.traf_note + '</div>';
+}else{
+h += '<div class=bar><i style="width:0%"></i></div>';
+h += '<div class=tnote>' + s.traf_note + '</div>';
+}
+}else{
+h += '<div class=row><span class=lbl>本月流量</span><span>暂无数据</span></div>';
+}
+}
+if(s.cpu_load === undefined) h += '<div class=row><span class=lbl>本月流量</span><span>失联 · 暂无数据</span></div>';
+if(s.services){
+for(const svc of s.services){
+h += '<div class=row><span class=lbl>服务</span><span>' + svc.label + '：' + (svc.ok ? '运行中' : '不可达') + '</span></div>';
+}
+}
+if(s.uptime) h += '<div class=row><span class=lbl>运行时长</span><span>' + s.uptime.replace('up ', '') + '</span></div>';
+if(s.detail) h += '<div class=row><span class=lbl>备注</span><span>' + s.detail + '</span></div>';
+if(PAGE_CONFIG.controlEnabled && s.control_actions && s.control_actions.length){
+h += '<div class=btns>';
+for(const a of s.control_actions){
+h += '<button class=' + (ACTION_CLASS[a] || 'b-reset') + ' onclick="ctrl(\'' + s.id + '\',\'' + a + '\',\'' + s.name + '\')">' + (ACTION_LABELS[a] || a) + '</button>';
+}
+h += '</div>';
+}
+h += '</div>';
+}
+document.getElementById('list').innerHTML = h;
+}catch(e){
+document.getElementById('updated').textContent = '加载失败，点刷新重试';
+}
+}
+async function ctrl(server, action, name){
+if(!confirm('确定对 ' + name + ' 执行「' + (ACTION_LABELS[action] || action) + '」吗？')) return;
+try{
+const r = await fetch('/api/control', { method: 'POST', headers: {'Content-Type': 'application/json'},
+body: JSON.stringify({ token: PAGE_CONFIG.controlToken, server: server, action: action })});
+const d = await r.json();
+alert(d.ok ? ('✅ ' + d.msg + '，状态页约1分钟后更新') : ('❌ ' + d.msg));
+setTimeout(load, 3000);
+}catch(e){ alert('❌ 请求失败'); }
+}
+load();
+setInterval(load, 60000);
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) load(); });
+window.addEventListener('pageshow', function(e){ if(e.persisted) load(); });
+</script>
+</body>
+</html>
