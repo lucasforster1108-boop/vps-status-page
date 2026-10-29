@@ -116,99 +116,24 @@ MIT，见 [LICENSE](LICENSE)。
 
 # vps-status-page (English)
 
-A minimal multi-server VPS status page: one static web page plus a collector script that runs once a minute, giving you an at-a-glance view of every server's online state, CPU load, memory, disk, monthly traffic, and key service health. Optional remote power buttons (start / stop / reboot).
+A status page for my VPS fleet: one static page plus a collector script that runs every minute. Each machine gets a card — up or down, CPU load, memory, disk, monthly traffic, uptime — plus optional TCP probes for services I care about, and optional power buttons (start/stop/reboot) if you are brave.
 
-> This repository is a sanitized, generic template of a personal project: all example IPs are from the documentation range (203.0.113.0/24), and all configuration, keys, and tokens are filled in by the user — the repo contains no real information.
+This is the sanitized template of the page I actually run. Example IPs are from the documentation range (203.0.113.0/24); configs, keys and tokens are yours to fill in — there is nothing real in here.
 
-## What you get
+How it fits together: cron every minute → `collector/check_status.py` reads the local box directly and pulls the rest over one SSH call each → writes `status.json` → nginx serves `web/` statically → the page fetches and renders, refreshing every 60 s (and immediately when it comes back to the foreground). Python stdlib plus free/df/vnstat, no third-party anything.
 
-- Card layout (4 columns on desktop, 2 on mobile), dark theme, PWA support for adding to a phone home screen
-- One card per machine: status dot (online / unreachable), IP and region, role description, CPU load, memory and disk bars (yellow at 70%, red at 90%), monthly traffic against quota, uptime
-- Optional TCP service probes (is a given port listening?), shown right on the card
-- The page auto-refreshes every 60 seconds, and refreshes immediately when it returns to the foreground
-- Optional control buttons: renders start/stop/reboot for designated machines, executed through a small local API running commands you pre-configure
+Quick start:
 
-## Structure
+1. `cp config.example.json config.json`; fill in `servers` and `output_path`.
+2. Put `web/` in your site root; `index.html` and the generated `status.json` live side by side.
+3. Cron the collector (`deploy/crontab.example`). Remote boxes are SSH-key only, and you should connect once by hand first so `known_hosts` is populated.
+4. Optional nginx with Basic Auth (`deploy/nginx-status.conf.example`). For a LAN-only page, any static file server works.
+5. Optional control buttons: set `control.enabled` and per-server commands in the config, run `control/control_api.py` under systemd with the token in an environment variable, and flip `controlEnabled` in the page's `PAGE_CONFIG`. The token sits inside a static page, so treat it as semi-public: Basic Auth is not optional in that setup, and the API listens on 127.0.0.1 only.
 
-```
-.
-├── config.example.json     # Example config: copy to config.json and fill in your servers
-├── collector/
-│   └── check_status.py     # Collector: reads the local machine directly, fetches all metrics from remote machines over one SSH call, writes status.json
-├── web/
-│   ├── index.html          # Single-file status page (styles and scripts inline, deploy as-is)
-│   ├── manifest.json       # PWA manifest (put icon-192/512.png alongside it, optional)
-│   └── status.example.json # Sample status.json — preview the rendered page directly
-├── control/
-│   └── control_api.py      # Optional: remote-control API (disabled by default, token via environment variable)
-└── deploy/
-    ├── nginx-status.conf.example       # Example nginx site (Basic Auth + reverse proxy for the control API)
-    ├── crontab.example                 # Example cron entry for per-minute collection
-    └── server-control.service.example  # Example systemd unit for the control API
-```
+Config, short version: `servers[].{id, name, location, role, host, local, ssh, traffic_quota_gb, checks, control_actions}`, `output_path`, `display_timezone_offset_hours`, and the `control` block. The Chinese table above documents every field. Traffic needs `vnstat` on each box; without it, that card simply has no traffic bar.
 
-Data flow: `cron (every minute) → check_status.py → status.json → nginx static hosting → browser fetch & render`. Everything uses only the Python 3 standard library plus standard system tools (free/df/vnstat) — no third-party dependencies.
+Security: `config.json`, private keys and tokens are gitignored — keep it that way. Give the collector its own SSH key, authorized only on the monitored boxes. Every example token in this repo is empty and every example command is an `echo` placeholder.
 
-## Quick start
-
-1. **Prepare the config**
-
-   ```bash
-   cp config.example.json config.json   # excluded by .gitignore, safe to fill in real values
-   ```
-
-   Edit `servers` to your own machines per the configuration reference below, and point `output_path` at your site root.
-
-2. **Deploy the page**: put the files from `web/` into your site root (e.g. `/var/www/status/`); `index.html` and the generated `status.json` just need to be in the same directory.
-
-3. **Set up the collection cron** (see `deploy/crontab.example`):
-
-   ```
-   * * * * * VPS_STATUS_CONFIG=/opt/vps-status/config.json /usr/bin/python3 /opt/vps-status/collector/check_status.py >> /var/log/vps-status.log 2>&1
-   ```
-
-   Remote machines are reached via SSH key login: the user running the collector must hold the private key referenced in the config, and you should connect to each machine once manually first to record its host fingerprint in known_hosts.
-
-4. **(Optional) Put nginx in front**: follow `deploy/nginx-status.conf.example`, generate a password file with `sudo htpasswd -c /etc/nginx/.status_htpasswd your-username`, and enable the site. For purely internal use, any static file server works.
-
-5. **(Optional) Enable the control buttons**:
-   - Generate a token with `openssl rand -hex 24`;
-   - In config.json set `control.enabled` to true, and under `control.commands` configure the shell command for each action per server id (only configure actions you are comfortable exposing — e.g. reboot only for the local machine);
-   - Run `control/control_api.py` under systemd using `deploy/server-control.service.example`, injecting the token via the `STATUS_CONTROL_TOKEN` environment variable;
-   - In the `PAGE_CONFIG` block at the top of `web/index.html`, set `controlEnabled` and fill in the same token, and add `control_actions` (e.g. `["reboot"]`) to the server in the config — only then do the buttons appear.
-   - ⚠️ The token sits in a static page, which makes it semi-public: the site must be protected with Basic Auth; the control API listens on 127.0.0.1 only — never expose it directly to the public internet.
-
-## Configuration (config.json)
-
-| Field | Description |
-|---|---|
-| `output_path` | Output path of status.json (under the site root) |
-| `display_timezone_offset_hours` | Optional. Show the "updated at" time with this UTC offset (e.g. 8); if unset, the collector machine's local time is used |
-| `servers[].id` | Unique machine identifier, used by both the page and the control API |
-| `servers[].name` / `location` / `role` | Name, region, and role description shown on the card |
-| `servers[].host` | IP or domain name |
-| `servers[].local` | true = the collector runs on this machine; metrics are read locally, no SSH |
-| `servers[].ssh` | For remote machines: `{user, key, port}`, where key is the private key path |
-| `servers[].traffic_quota_gb` | Monthly traffic quota (GB, outbound); null = not recorded, usage only |
-| `servers[].traffic_note` | Small print shown under the traffic bar |
-| `servers[].checks` | TCP probe list: `{type:"tcp", port:443, label:"HTTPS"}` |
-| `servers[].state_cmd` | Optional: a command whose first output line is used as the cloud provider state (e.g. a cloud CLI query); if unset, state is shown as RUNNING/UNKNOWN based on reachability |
-| `servers[].control_actions` | Optional: the subset of control actions to show on the page, `["start","stop","reset","reboot"]` |
-| `control` | Optional control-component config: `enabled`, `listen`, `port`, `token_env`, `commands` (command templates per server id, supporting `{host}` and `{id}` placeholders) |
-
-Traffic stats rely on `vnstat` being installed on each machine; machines without it simply don't show a traffic bar — all other metrics are unaffected.
-
-## Security notes
-
-- Never commit `config.json`, private keys, or tokens to the repo (`.gitignore` ships with exclusion rules preconfigured).
-- Generate a dedicated SSH key for the collector, authorize it only on the monitored machines, and consider tightening it further on the monitored side (e.g. `command=` restrictions or a read-only account in `authorized_keys`) — advanced, evaluate for yourself.
-- All example token slots in the repo are empty and example commands are `echo` placeholders — there are no usable real credentials anywhere in this repo.
-
-## Dependencies
-
-- Collector machine: Python 3.8+, OpenSSH client; monitored machines: OpenSSH server, procps (free/df), optionally vnstat for traffic stats
-- Hosting: any static file server; the reverse-proxy example for the control component uses nginx
-
-## License
+Needs Python 3.8+ and an OpenSSH client on the collector; sshd and procps on the targets.
 
 MIT, see [LICENSE](LICENSE).
